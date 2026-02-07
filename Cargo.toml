@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 dashmap = "6.1.0"
-tokio = "1.49.0"
-
 babel-macros = { path = "babel-macros" }
+log = "0.4.29"
 

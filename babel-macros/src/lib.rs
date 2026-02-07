@@ -2,13 +2,13 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput, FnArg, ImplItem, ItemImpl, PatType, Type};
 
-#[proc_macro_derive(Request)]
-pub fn derive_request(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(IPC)]
+pub fn derive_ipc(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
 
     let expanded = quote! {
-        impl Request for #name {
+        impl babel_rs::event::IPCEvent for #name {
             fn as_any(&self) -> &dyn std::any::Any {
                 self
             }
@@ -19,59 +19,105 @@ pub fn derive_request(input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
+pub fn request_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+#[proc_macro_attribute]
+pub fn reply_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+#[proc_macro_attribute]
+pub fn notification_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+#[proc_macro_attribute]
 pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let impl_block = parse_macro_input!(item as ItemImpl);
 
     let self_ty = &impl_block.self_ty;
-    let mut handler_registrations = vec![];
+    let mut request_handler_registrations = vec![];
+    let mut reply_handler_registrations = vec![];
+    let mut notification_handler_registrations = vec![];
 
-    // iterate through methods
     for item in &impl_block.items {
-        match item {
-            ImplItem::Fn(method) => {
-                let method_name = &method.sig.ident;
+        if let ImplItem::Fn(method) = item {
+            let method_name = &method.sig.ident;
 
-                // check if second parameter exists and is a reference
-                let mut inputs = method.sig.inputs.iter();
-                inputs.next(); // skip &mut self
+            // check which attribute is present
+            let is_request = method.attrs.iter().any(|attr| attr.path().is_ident("request_handler"));
+            let is_reply = method.attrs.iter().any(|attr| attr.path().is_ident("reply_handler"));
+            let is_notification = method.attrs.iter().any(|attr| attr.path().is_ident("notification_handler"));
 
-                if let Some(FnArg::Typed(PatType { ty, .. })) = inputs.next() {
-                    if let Type::Reference(type_ref) = &**ty {
-                        let req_type = &type_ref.elem;
+            // extract event type from second parameter
+            if let Some(event_type) = extract_event_type(&method.sig) {
+                let handler_code = quote! {
+                    handlers.insert(
+                        std::any::TypeId::of::<#event_type>(),
+                        Box::new(|protocol: &mut dyn std::any::Any, req: &dyn babel_rs::event::IPCEvent, sender: ProtocolId, handle: &ProtocolHandle| {
+                            let protocol = protocol
+                                .downcast_mut::<#self_ty>()
+                                .expect("Protocol type mismatch");
 
-                        handler_registrations.push(quote! {
-                            handlers.insert(
-                                std::any::TypeId::of::<#req_type>(),
-                                Box::new(|protocol: &mut dyn std::any::Any, req: &dyn Request, sender: ProtocolId, handle: &ProtocolHandle| {
-                                    let protocol = protocol
-                                        .downcast_mut::<#self_ty>()
-                                        .expect("Protocol type mismatch");
+                            if let Some(typed_req) = req.as_any().downcast_ref::<#event_type>() {
+                                protocol.#method_name(typed_req, sender, handle);
+                            }
+                        }) as babel_rs::event::IPCHandlerFn
+                    );
+                };
 
-                                    if let Some(typed_req) = req.as_any().downcast_ref::<#req_type>() {
-                                        protocol.#method_name(typed_req, sender, handle);
-                                    }
-                                }) as RequestHandlerFn
-                            );
-                        });
-                    }
+                if is_request {
+                    request_handler_registrations.push(handler_code);
+                } else if is_reply {
+                    reply_handler_registrations.push(handler_code);
+                } else if is_notification {
+                    notification_handler_registrations.push(handler_code);
                 }
             }
-            _ => {}
         }
     }
 
     let expanded = quote! {
         #impl_block
 
-        impl ProtocolHandlers for #self_ty {
-            fn get_request_handlers() -> std::collections::HashMap<std::any::TypeId, RequestHandlerFn> {
+        impl babel_rs::protocol::ProtocolHandlers for #self_ty {
+            fn get_request_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel_rs::event::IPCHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
-                #(#handler_registrations)*
+                #(#request_handler_registrations)*
+                handlers
+            }
+
+            fn get_reply_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel_rs::event::IPCHandlerFn> {
+                use std::collections::HashMap;
+                let mut handlers = HashMap::new();
+                #(#reply_handler_registrations)*
+                handlers
+            }
+
+            fn get_notification_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel_rs::event::IPCHandlerFn> {
+                use std::collections::HashMap;
+                let mut handlers = HashMap::new();
+                #(#notification_handler_registrations)*
                 handlers
             }
         }
     };
 
     TokenStream::from(expanded)
+}
+
+/// extract the event type from the second parameter
+fn extract_event_type(sig: &syn::Signature) -> Option<&Type> {
+    let inputs: Vec<_> = sig.inputs.iter().collect();
+
+    if let Some(FnArg::Typed(PatType { ty, .. })) = inputs.get(1) {
+        if let Type::Reference(type_ref) = &**ty {
+            return Some(&*type_ref.elem);
+        }
+    }
+
+    None
 }

@@ -1,11 +1,18 @@
-use crate::core::protocol::{Protocol, ProtocolHandle, ProtocolId};
+use crate::core::protocol::{ProtocolHandle, ProtocolId};
 use std::any::Any;
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EventId(pub u16);
-
-pub trait Request: Any + Send + 'static {
+pub trait IPCEvent: Any + Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
-pub type RequestHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn Request, ProtocolId, &ProtocolHandle) + Send + Sync>;
+pub enum Event {
+    Request(ProtocolId, Box<dyn IPCEvent>),
+    Reply(ProtocolId, Box<dyn IPCEvent>),
+    Notification(ProtocolId, Arc<dyn IPCEvent>),
+    Message,
+    Channel,
+    Shutdown
+}
+
+pub type IPCHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn IPCEvent, ProtocolId, &ProtocolHandle)>;
