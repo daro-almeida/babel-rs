@@ -126,7 +126,7 @@ pub trait Protocol: Send + 'static {
     fn init(&mut self, handle: &ProtocolHandle);
 }
 
-pub trait ProtocolHandlers {
+pub trait ProtocolHandlers: Protocol {
     fn get_request_handlers(&self) -> HashMap<TypeId, IPCHandlerFn>;
     fn get_reply_handlers(&self) -> HashMap<TypeId, IPCHandlerFn>;
     fn get_notification_handlers(&self) -> HashMap<TypeId, IPCHandlerFn>;

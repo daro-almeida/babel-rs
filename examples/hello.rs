@@ -1,13 +1,13 @@
-use babel_macros::{protocol, Request};
+use babel_macros::{IPC, protocol, reply_handler, request_handler};
 use babel_rs::protocol::{Protocol, ProtocolHandle, ProtocolId};
 
-#[derive(Debug, Request)]
-pub struct HelloRequest {
+#[derive(Debug, IPC)]
+pub struct Hello {
     pub subject: String,
 }
 
-#[derive(Debug, Request)]
-pub struct GoodbyeRequest {
+#[derive(Debug, IPC)]
+pub struct Goodbye {
     pub reason: String,
 }
 
@@ -24,32 +24,32 @@ impl Protocol for HelloProtocol {
         "HelloProtocol"
     }
 
-    fn init(&mut self) {
+    fn init(&mut self, _handle: &ProtocolHandle) {
         println!("Init");
     }
 }
 
-pub trait HelloProtocolSpec: Protocol {
-    fn on_hello(&mut self, req: &HelloRequest, sender: ProtocolId, handle: &ProtocolHandle);
-    fn on_goodbye(&mut self, req: &GoodbyeRequest, sender: ProtocolId, handle: &ProtocolHandle);
-}
-
 #[protocol]
-impl HelloProtocolSpec for HelloProtocol {
-    fn on_hello(&mut self, req: &HelloRequest, sender: ProtocolId, handle: &ProtocolHandle) {
-        println!("Hello, {}!", req.subject);
+impl HelloProtocol {
+    #[request_handler]
+    fn on_hello(
+        &mut self,
+        Hello { subject }: &Hello,
+        _source_proto: ProtocolId,
+        _handle: &ProtocolHandle,
+    ) {
+        println!("Hello, {}!", subject);
     }
 
+    #[reply_handler]
     fn on_goodbye(
         &mut self,
-        GoodbyeRequest { reason }: &GoodbyeRequest,
-        sender: ProtocolId,
-        handle: &ProtocolHandle,
+        Goodbye { reason }: &Goodbye,
+        _source_proto: ProtocolId,
+        _handle: &ProtocolHandle,
     ) {
         println!("Goodbye: {}", reason);
     }
 }
 
-fn main() {
-
-}
+fn main() {}
