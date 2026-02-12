@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, FnArg, ImplItem, ItemImpl, PatType, Type, parse_macro_input};
 
-#[proc_macro_derive(IPC)]
+#[proc_macro_derive(Ipc)]
 pub fn derive_ipc(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -66,7 +66,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let handler_code = quote! {
                     handlers.insert(
                         std::any::TypeId::of::<#event_type>(),
-                        Box::new(|protocol: &mut dyn std::any::Any, req: &dyn babel::event::IPCEvent, sender: ProtocolId, handle: &ProtocolHandle| {
+                        Box::new(|protocol: &mut dyn std::any::Any, req: &dyn babel::event::IPCEvent, sender: ProtocolId, handle: ProtocolHandle| {
                             let protocol = protocol
                                 .downcast_mut::<#self_ty>()
                                 .expect("Protocol type mismatch");
@@ -79,15 +79,28 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 };
 
                 if is_request {
-                    request_handler_registrations.push(handler_code);
-                } else if is_reply {
-                    reply_handler_registrations.push(handler_code);
-                } else if is_notification {
+                    request_handler_registrations.push(handler_code.clone());
+                }
+                if is_reply {
+                    reply_handler_registrations.push(handler_code.clone());
+                }
+                if is_notification {
                     let sub_code =
-                        quote! {subscriptions.push(std::any::TypeId::of::<#event_type>())};
+                        quote! {subscriptions.push(std::any::TypeId::of::<#event_type>());};
                     subscription_registrations.push(sub_code);
                     notification_handler_registrations.push(handler_code);
                 }
+            } else if is_request || is_reply || is_notification {
+                panic!(
+                    "Invalid handler '{}' for IPC event attributes {}. Expected signature: (&mut self, &<IPCEvent>, ProtocolId, ProtocolHandle)",
+                    method_name,
+                    method
+                        .attrs
+                        .iter()
+                        .map(|attr| attr.path().get_ident().unwrap().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
             }
         }
     }
@@ -109,7 +122,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #(#reply_handler_registrations)*
                 handlers
             }
-            
+
             fn get_subscriptions(&self) -> std::vec::Vec<std::any::TypeId> {
                 use std::vec::Vec;
                 let mut subscriptions = Vec::new();

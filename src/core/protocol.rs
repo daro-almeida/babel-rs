@@ -48,7 +48,7 @@ impl ProtocolRuntime {
 
             let handle = ProtocolHandle::new(protocol_id, babel_event_sender);
 
-            protocol.init(&handle);
+            protocol.init(handle.clone());
 
             loop {
                 let protocol_any: &mut dyn Any = &mut protocol;
@@ -57,21 +57,21 @@ impl ProtocolRuntime {
                         protocol_any,
                         &*event,
                         from,
-                        &handle,
+                        handle.clone(),
                         &request_handlers,
                     ),
                     Ok(Event::Reply(from, _, event)) => Self::handle_ipc_event(
                         protocol_any,
                         &*event,
                         from,
-                        &handle,
+                        handle.clone(),
                         &reply_handlers,
                     ),
                     Ok(Event::Notification(from, event)) => Self::handle_ipc_event(
                         protocol_any,
                         &*event,
                         from,
-                        &handle,
+                        handle.clone(),
                         &notif_handlers,
                     ),
                     Ok(Event::Message) | Ok(Event::Channel) => todo!(),
@@ -91,7 +91,7 @@ impl ProtocolRuntime {
         protocol_any: &mut dyn Any,
         event: &dyn IPCEvent,
         from: ProtocolId,
-        handle: &ProtocolHandle,
+        handle: ProtocolHandle,
         handlers_map: &HashMap<TypeId, IPCHandlerFn>,
     ) {
         let type_id = event.type_id();
@@ -104,6 +104,7 @@ impl ProtocolRuntime {
     }
 }
 
+#[derive(Clone)]
 pub struct ProtocolHandle {
     id: ProtocolId,
     babel_event_sender: mpsc::Sender<Event>,
@@ -142,7 +143,7 @@ pub trait ProtocolInit {
         // default to implementing struct name
         std::any::type_name::<Self>() //.rsplit("::").next().unwrap()
     }
-    fn init(&mut self, handle: &ProtocolHandle);
+    fn init(&mut self, handle: ProtocolHandle);
 }
 
 pub trait ProtocolHandlers: ProtocolInit {

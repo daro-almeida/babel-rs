@@ -90,6 +90,10 @@ pub struct Babel {
 }
 
 impl Babel {
+    pub fn shutdown(&self) {
+        todo!()
+    }
+    
     fn start_protocol_event_listener(self: Arc<Self>, babel_proto_event_receive: Receiver<Event>) {
         thread::spawn(move || {
             loop {
@@ -109,7 +113,7 @@ impl Babel {
         });
     }
 
-    pub fn send_single_ipc(&self, to: ProtocolId, event: Event) {
+    fn send_single_ipc(&self, to: ProtocolId, event: Event) {
         if let Some(runtime) = self.runtimes.get(&to) {
             runtime.value().send_event(event);
         } else {
@@ -117,7 +121,7 @@ impl Babel {
         }
     }
 
-    pub fn send_notification(&self, from: ProtocolId, ipc_arc: Arc<dyn IPCEvent>) {
+    fn send_notification(&self, from: ProtocolId, ipc_arc: Arc<dyn IPCEvent>) {
         if let Some(subscribers) = self.notification_subscriptions.get(&ipc_arc.type_id()) {
             for runtime in subscribers.value() {
                 runtime.send_event(Event::Notification(from, ipc_arc.clone()));
