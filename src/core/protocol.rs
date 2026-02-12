@@ -1,4 +1,3 @@
-use crate::core::babel::Babel;
 use crate::core::event::{Event, IPCEvent, IPCHandlerFn};
 use log::{debug, warn};
 use std::any::{Any, TypeId};
@@ -17,53 +16,64 @@ impl Display for ProtocolId {
     }
 }
 
+#[derive(Clone)]
 pub struct ProtocolRuntime {
-    pub name: String,
-    event_tx: mpsc::Sender<Event>,
+    proto_event_sender: mpsc::Sender<Event>,
 }
 
 impl ProtocolRuntime {
-    pub fn new<P: Protocol + ProtocolHandlers>(protocol: P, babel_instance: Arc<Babel>) -> Self {
-        let name = protocol.name().to_owned();
-        let (event_tx, event_rx) = mpsc::channel();
-        Self::spawn_protocol_thread(protocol, event_rx, babel_instance);
-        Self { name, event_tx }
+    pub fn new(proto_event_sender: mpsc::Sender<Event>) -> Self {
+        Self {
+            proto_event_sender,
+        }
     }
 
     pub fn send_event(&self, event: Event) {
-        self.event_tx
+        self.proto_event_sender
             .send(event)
             .expect("Protocol event channel closed unexpectedly");
     }
 
-    fn spawn_protocol_thread<P: Protocol + ProtocolHandlers>(
-        mut protocol: P,
-        event_rx: mpsc::Receiver<Event>,
-        babel: Arc<Babel>,
+    pub fn spawn_protocol_thread(
+        mut protocol: Box<dyn Protocol>,
+        proto_event_receiver: mpsc::Receiver<Event>,
+        babel_event_sender: mpsc::Sender<Event>,
     ) {
         thread::spawn(move || {
             let protocol_id = protocol.id();
 
-            let req_handlers = protocol.get_request_handlers();
+            let request_handlers = protocol.get_request_handlers();
             let reply_handlers = protocol.get_reply_handlers();
             let notif_handlers = protocol.get_notification_handlers();
 
-            let handle = ProtocolHandle::new(protocol_id, babel);
+            let handle = ProtocolHandle::new(protocol_id, babel_event_sender);
 
             protocol.init(&handle);
 
             loop {
                 let protocol_any: &mut dyn Any = &mut protocol;
-                match event_rx.recv() {
-                    Ok(Event::Request(from, event)) => {
-                        Self::handle_ipc_event(protocol_any, &*event, from, &handle, &req_handlers)
-                    }
-                    Ok(Event::Reply(from, event)) => {
-                        Self::handle_ipc_event(protocol_any, &*event, from, &handle, &reply_handlers)
-                    }
-                    Ok(Event::Notification(from, event)) => {
-                        Self::handle_ipc_event(protocol_any, &*event, from, &handle, &notif_handlers)
-                    }
+                match proto_event_receiver.recv() {
+                    Ok(Event::Request(from, _, event)) => Self::handle_ipc_event(
+                        protocol_any,
+                        &*event,
+                        from,
+                        &handle,
+                        &request_handlers,
+                    ),
+                    Ok(Event::Reply(from, _, event)) => Self::handle_ipc_event(
+                        protocol_any,
+                        &*event,
+                        from,
+                        &handle,
+                        &reply_handlers,
+                    ),
+                    Ok(Event::Notification(from, event)) => Self::handle_ipc_event(
+                        protocol_any,
+                        &*event,
+                        from,
+                        &handle,
+                        &notif_handlers,
+                    ),
                     Ok(Event::Message) | Ok(Event::Channel) => todo!(),
                     Ok(Event::Shutdown) => {
                         debug!("Protocol {} shutting down", protocol.name());
@@ -96,28 +106,37 @@ impl ProtocolRuntime {
 
 pub struct ProtocolHandle {
     id: ProtocolId,
-    babel_instance: Arc<Babel>,
+    babel_event_sender: mpsc::Sender<Event>,
 }
 
 impl ProtocolHandle {
-    pub fn new(id: ProtocolId, babel_instance: Arc<Babel>) -> Self {
-        Self { id, babel_instance }
+    pub fn new(id: ProtocolId, babel_event_sender: mpsc::Sender<Event>) -> Self {
+        Self {
+            id,
+            babel_event_sender,
+        }
     }
 
     pub fn send_request(&self, to: ProtocolId, request: impl IPCEvent) {
-        self.babel_instance.send_request(self.id, to, request)
+        self.babel_event_sender
+            .send(Event::Request(self.id, to, Box::new(request)))
+            .expect("Babel event channel closed");
     }
 
     pub fn send_reply(&self, to: ProtocolId, reply: impl IPCEvent) {
-        self.babel_instance.send_reply(self.id, to, reply)
+        self.babel_event_sender
+            .send(Event::Reply(self.id, to, Box::new(reply)))
+            .expect("Babel event channel closed");
     }
 
     pub fn notify(&self, notif: impl IPCEvent) {
-        self.babel_instance.send_notification(self.id, notif)
+        self.babel_event_sender
+            .send(Event::Notification(self.id, Arc::new(notif)))
+            .expect("Babel event channel closed");
     }
 }
 
-pub trait Protocol: Send + 'static {
+pub trait ProtocolInit {
     fn id(&self) -> ProtocolId;
     fn name(&self) -> &str {
         // default to implementing struct name
@@ -126,12 +145,16 @@ pub trait Protocol: Send + 'static {
     fn init(&mut self, handle: &ProtocolHandle);
 }
 
-pub trait ProtocolHandlers: Protocol {
+pub trait ProtocolHandlers: ProtocolInit {
     fn get_request_handlers(&self) -> HashMap<TypeId, IPCHandlerFn>;
     fn get_reply_handlers(&self) -> HashMap<TypeId, IPCHandlerFn>;
+    fn get_subscriptions(&self) -> Vec<TypeId>;
     fn get_notification_handlers(&self) -> HashMap<TypeId, IPCHandlerFn>;
 
     //fn get_message_handlers() -> HashMap<TypeId, todo!()>;
     //fn get_channel_event_handlers() -> HashMap<TypeId, todo!()>;
     //fn get_shutdown_handler() -> HashMap<TypeId, todo!()>;
 }
+
+pub trait Protocol: ProtocolInit + ProtocolHandlers + Send + 'static {}
+impl<T: Protocol> Protocol for T {}

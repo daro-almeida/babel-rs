@@ -1,5 +1,5 @@
-use babel_macros::{IPC, protocol, reply_handler, request_handler};
-use babel_rs::protocol::{Protocol, ProtocolHandle, ProtocolId};
+use babel_macros::{protocol, reply_handler, request_handler, IPC};
+use babel_rs::protocol::{Protocol, ProtocolHandle, ProtocolId, ProtocolInit};
 
 #[derive(Debug, IPC)]
 pub struct Hello {
@@ -13,20 +13,6 @@ pub struct Goodbye {
 
 pub struct HelloProtocol {
     id: ProtocolId,
-}
-
-impl Protocol for HelloProtocol {
-    fn id(&self) -> ProtocolId {
-        self.id
-    }
-
-    fn name(&self) -> &str {
-        "HelloProtocol"
-    }
-
-    fn init(&mut self, _handle: &ProtocolHandle) {
-        println!("Init");
-    }
 }
 
 #[protocol]

@@ -7,8 +7,8 @@ pub trait IPCEvent: Any + Send + Sync + 'static {
 }
 
 pub enum Event {
-    Request(ProtocolId, Box<dyn IPCEvent>),
-    Reply(ProtocolId, Box<dyn IPCEvent>),
+    Request(ProtocolId, ProtocolId, Box<dyn IPCEvent>),
+    Reply(ProtocolId, ProtocolId, Box<dyn IPCEvent>),
     Notification(ProtocolId, Arc<dyn IPCEvent>),
     Message,
     Channel,
