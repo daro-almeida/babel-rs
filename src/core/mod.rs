@@ -1,3 +1,3 @@
-mod babel;
+pub mod babel;
 pub mod protocol;
 pub mod event;

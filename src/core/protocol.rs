@@ -157,4 +157,4 @@ pub trait ProtocolHandlers: ProtocolInit {
 }
 
 pub trait Protocol: ProtocolInit + ProtocolHandlers + Send + 'static {}
-impl<T: Protocol> Protocol for T {}
+impl<T: ProtocolInit + ProtocolHandlers + Send + 'static> Protocol for T {}

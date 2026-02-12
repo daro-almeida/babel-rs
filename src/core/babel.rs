@@ -1,43 +1,27 @@
 use crate::core::event::{Event, IPCEvent};
 use crate::core::protocol::{Protocol, ProtocolId, ProtocolRuntime};
-use crate::protocol::ProtocolHandlers;
 use anyhow::anyhow;
-use dashmap::{DashMap};
+use dashmap::DashMap;
 use log::warn;
 use std::any::{Any, TypeId};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::marker::PhantomData;
-use std::sync::{mpsc, Arc};
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, mpsc};
 use std::thread;
 
-struct SettingUp;
-struct Started;
-
-pub struct Babel<State> {
-    state: State,
+pub struct BabelInit {
     protocols: HashMap<ProtocolId, Box<dyn Protocol>>,
-    runtimes: DashMap<ProtocolId, ProtocolRuntime>,
-    notification_subscriptions: DashMap<TypeId, Vec<ProtocolRuntime>>,
-    // timer_manager: TimerManager,
-    // channel_manager: ChannelManager,
 }
 
-impl Babel<SettingUp> {
+impl BabelInit {
     pub fn new() -> Self {
-        Babel {
-            state: SettingUp,
+        BabelInit {
             protocols: HashMap::new(),
-            runtimes: DashMap::new(),
-            notification_subscriptions: DashMap::new(),
         }
     }
 
-    pub fn register_protocol(
-        &mut self,
-        protocol: impl Protocol,
-    ) -> anyhow::Result<()> {
+    pub fn register_protocol(&mut self, protocol: impl Protocol) -> anyhow::Result<()> {
         match self.protocols.entry(protocol.id()) {
             Entry::Occupied(v) => Err(anyhow!(
                 "ProtocolId conflict: {} <-> {}",
@@ -51,51 +35,78 @@ impl Babel<SettingUp> {
         }
     }
 
-    fn start_protocol_event_listener(babel: Arc<Babel<Started>>, babel_proto_event_receive: Receiver<Event>) {
-        thread::spawn(move || {
-            loop {
-                match babel_proto_event_receive.recv() {
-                    Ok() => ,
-                    Err() => ,
-                }
-            }
-        })
-    }
+    pub fn start(self) -> Arc<Babel> {
+        let mut proto_channer_pairs = HashMap::new();
+        let runtimes = DashMap::new();
+        let notification_subscriptions: DashMap<TypeId, Vec<ProtocolRuntime>> = DashMap::new();
+        let mut babel_event_receivers = Vec::new();
 
-    pub fn start(self) {
-        let mut channer_pairs = HashMap::new();
-        
-        let babel_arc = Arc::new(self);
         for (&id, protocol) in self.protocols.iter() {
             let (proto_event_sender, proto_event_receiver) = mpsc::channel();
             let (babel_proto_event_sender, babel_proto_event_receiver) = mpsc::channel();
 
-            channer_pairs.insert(id, (babel_proto_event_sender, proto_event_receiver));
-
-            Self::start_protocol_event_listener(babel_proto_event_receiver);
+            proto_channer_pairs.insert(id, (babel_proto_event_sender, proto_event_receiver));
+            babel_event_receivers.push(babel_proto_event_receiver);
 
             let runtime = ProtocolRuntime::new(proto_event_sender);
-            self.runtimes.insert(id, runtime.clone());
+            runtimes.insert(id, runtime.clone());
 
             for sub in protocol.get_subscriptions() {
-                self.notification_subscriptions.entry(sub).or_default().push(runtime.clone());
+                notification_subscriptions
+                    .entry(sub)
+                    .or_default()
+                    .push(runtime.clone());
             }
         }
 
-        for (id, protocol) in self.protocols {
-            let (babel_proto_event_sender, proto_event_receiver) = channer_pairs.remove(&id).unwrap();
-            ProtocolRuntime::spawn_protocol_thread(protocol, proto_event_receiver, babel_proto_event_sender);
+        let babel = Arc::new(Babel {
+            runtimes,
+            notification_subscriptions,
+        });
+
+        for babel_proto_event_receiver in babel_event_receivers {
+            Babel::start_protocol_event_listener(babel.clone(), babel_proto_event_receiver);
         }
+
+        for (id, protocol) in self.protocols {
+            let (babel_proto_event_sender, proto_event_receiver) =
+                proto_channer_pairs.remove(&id).unwrap();
+            ProtocolRuntime::spawn_protocol_thread(
+                protocol,
+                proto_event_receiver,
+                babel_proto_event_sender,
+            );
+        }
+
+        babel
     }
 }
 
-impl Babel<Started> {
-    pub fn send_request(&self, from: ProtocolId, to: ProtocolId, ipc: impl IPCEvent) {
-        self.send_single_ipc(to, Event::Request(from, Box::new(ipc)));
-    }
+pub struct Babel {
+    runtimes: DashMap<ProtocolId, ProtocolRuntime>,
+    notification_subscriptions: DashMap<TypeId, Vec<ProtocolRuntime>>,
+    // timer_manager: TimerManager,
+    // channel_manager: ChannelManager,
+}
 
-    pub fn send_reply(&self, from: ProtocolId, to: ProtocolId, ipc: impl IPCEvent) {
-        self.send_single_ipc(to, Event::Reply(from, Box::new(ipc)));
+impl Babel {
+    fn start_protocol_event_listener(self: Arc<Self>, babel_proto_event_receive: Receiver<Event>) {
+        thread::spawn(move || {
+            loop {
+                match babel_proto_event_receive.recv() {
+                    Ok(event) => match event {
+                        Event::Request(_, to, _) | Event::Reply(_, to, _) => {
+                            self.send_single_ipc(to, event)
+                        }
+                        Event::Notification(from, ipc) => self.send_notification(from, ipc),
+                        Event::Message => todo!(),
+                        Event::Channel => todo!(),
+                        Event::Shutdown => todo!(),
+                    },
+                    Err(_) => panic!("Protocol event listener closed unexpectedly"),
+                }
+            }
+        });
     }
 
     pub fn send_single_ipc(&self, to: ProtocolId, event: Event) {
@@ -106,8 +117,7 @@ impl Babel<Started> {
         }
     }
 
-    pub fn send_notification(&self, from: ProtocolId, ipc: impl IPCEvent) {
-        let ipc_arc = Arc::new(ipc);
+    pub fn send_notification(&self, from: ProtocolId, ipc_arc: Arc<dyn IPCEvent>) {
         if let Some(subscribers) = self.notification_subscriptions.get(&ipc_arc.type_id()) {
             for runtime in subscribers.value() {
                 runtime.send_event(Event::Notification(from, ipc_arc.clone()));
