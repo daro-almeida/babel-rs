@@ -9,6 +9,10 @@ dashmap = "6.1.0"
 babel-macros = { path = "babel-macros" }
 log = "0.4.29"
 
+[dev-dependencies]
+rand = "0.10.0"
+uuid = { version = "1.20.0", features = ["v4"] }
+
 [[example]]
 name = "chat_app"
 path = "examples/chat_app/main.rs"
