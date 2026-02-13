@@ -4,24 +4,31 @@ use anyhow::anyhow;
 use dashmap::DashMap;
 use log::warn;
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::thread;
 
-pub struct BabelInit {
+pub struct BabelBuilder {
     protocols: HashMap<ProtocolId, Box<dyn Protocol>>,
+    log_level: Option<log::LevelFilter>,
 }
 
-impl BabelInit {
+impl BabelBuilder {
     pub fn new() -> Self {
-        BabelInit {
+        BabelBuilder {
             protocols: HashMap::new(),
+            log_level: None,
         }
     }
 
-    pub fn register_protocol(&mut self, protocol: impl Protocol) -> anyhow::Result<()> {
+    pub fn with_logging(mut self, level: log::LevelFilter) -> Self {
+        self.log_level = Some(level);
+        self
+    }
+
+    pub fn register_protocol(mut self, protocol: impl Protocol) -> anyhow::Result<Self> {
         match self.protocols.entry(protocol.id()) {
             Entry::Occupied(v) => Err(anyhow!(
                 "ProtocolId conflict: {} <-> {}",
@@ -30,12 +37,19 @@ impl BabelInit {
             )),
             Entry::Vacant(v) => {
                 v.insert(Box::new(protocol));
-                Ok(())
+                Ok(self)
             }
         }
     }
 
     pub fn start(self) -> Arc<Babel> {
+        if let Some(level) = self.log_level {
+            env_logger::Builder::new()
+                .filter_level(level)
+                .try_init()
+                .ok();
+        }
+
         let mut proto_channer_pairs = HashMap::new();
         let runtimes = DashMap::new();
         let notification_subscriptions: DashMap<TypeId, Vec<ProtocolRuntime>> = DashMap::new();
@@ -91,9 +105,10 @@ pub struct Babel {
 
 impl Babel {
     pub fn shutdown(&self) {
+        eprintln!("SHUTDOWN!");
         todo!()
     }
-    
+
     fn start_protocol_event_listener(self: Arc<Self>, babel_proto_event_receive: Receiver<Event>) {
         thread::spawn(move || {
             loop {
