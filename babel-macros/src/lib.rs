@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, FnArg, ImplItem, ItemImpl, PatType, Type, parse_macro_input};
+use syn::{parse_macro_input, DeriveInput, FnArg, ImplItem, ItemImpl, PatType, Type};
 
 #[proc_macro_derive(Ipc)]
 pub fn derive_ipc(input: TokenStream) -> TokenStream {
@@ -34,6 +34,11 @@ pub fn notification_handler(_attr: TokenStream, item: TokenStream) -> TokenStrea
 }
 
 #[proc_macro_attribute]
+pub fn shutdown_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+#[proc_macro_attribute]
 pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let impl_block = parse_macro_input!(item as ItemImpl);
 
@@ -42,65 +47,75 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut reply_handler_registrations = vec![];
     let mut subscription_registrations = vec![];
     let mut notification_handler_registrations = vec![];
+    let mut shutdown_handler = quote! { None };
 
     for item in &impl_block.items {
         if let ImplItem::Fn(method) = item {
             let method_name = &method.sig.ident;
 
-            // check which attribute is present
-            let is_request = method
-                .attrs
-                .iter()
-                .any(|attr| attr.path().is_ident("request_handler"));
-            let is_reply = method
-                .attrs
-                .iter()
-                .any(|attr| attr.path().is_ident("reply_handler"));
-            let is_notification = method
-                .attrs
-                .iter()
-                .any(|attr| attr.path().is_ident("notification_handler"));
+            for attr in &method.attrs {
+                if let Some(ident) = attr.path().get_ident() {
+                    let handler = ident.to_string();
+                    match handler.as_str() {
+                        "request_handler" | "reply_handler" | "notification_handler" => {
+                            if let Some(event_type) = extract_event_type(&method.sig) {
+                                let handler_code = quote! {
+                                    handlers.insert(
+                                        std::any::TypeId::of::<#event_type>(),
+                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::event::IPCEvent, sender: ProtocolId, handle: ProtocolHandle| {
+                                            let protocol = protocol
+                                                .downcast_mut::<#self_ty>()
+                                                .expect("Protocol type mismatch");
 
-            // extract event type from second parameter
-            if let Some(event_type) = extract_event_type(&method.sig) {
-                let handler_code = quote! {
-                    handlers.insert(
-                        std::any::TypeId::of::<#event_type>(),
-                        Box::new(|protocol: &mut dyn std::any::Any, req: &dyn babel::event::IPCEvent, sender: ProtocolId, handle: ProtocolHandle| {
-                            let protocol = protocol
-                                .downcast_mut::<#self_ty>()
+                                            if let Some(typed_ipc) = ipc.as_any().downcast_ref::<#event_type>() {
+                                                protocol.#method_name(typed_ipc, sender, handle);
+                                            }
+                                        }) as babel::event::IPCHandlerFn
+                                    );
+                                };
+
+                                match handler.as_str() {
+                                    "request_handler" => {
+                                        request_handler_registrations.push(handler_code)
+                                    }
+                                    "reply_handler" => {
+                                        reply_handler_registrations.push(handler_code)
+                                    }
+                                    "notification_handler" => {
+                                        let sub_code = quote! {subscriptions.push(std::any::TypeId::of::<#event_type>());};
+                                        subscription_registrations.push(sub_code);
+                                        notification_handler_registrations.push(handler_code)
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            } else {
+                                panic!(
+                                    "Invalid handler '{}' for IPC event attributes {}. Expected signature: (&mut self, &<IPCEvent>, ProtocolId, ProtocolHandle)",
+                                    method_name,
+                                    method
+                                        .attrs
+                                        .iter()
+                                        .map(|attr| attr.path().get_ident().unwrap().to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                );
+                            }
+                        }
+                        "shutdown_handler" => {
+                            let handler_code = quote! {
+                            Some(Box::new( | protocol: & mut dyn std::any::Any, handle: ProtocolHandle | {
+                                let protocol = protocol
+                                .downcast_mut::< # self_ty> ()
                                 .expect("Protocol type mismatch");
 
-                            if let Some(typed_req) = req.as_any().downcast_ref::<#event_type>() {
-                                protocol.#method_name(typed_req, sender, handle);
-                            }
-                        }) as babel::event::IPCHandlerFn
-                    );
-                };
-
-                if is_request {
-                    request_handler_registrations.push(handler_code.clone());
+                                protocol.# method_name(handle);
+                                }) as babel::event::ShutdownHandlerFn)
+                            };
+                            shutdown_handler = handler_code;
+                        }
+                        _ => {}
+                    }
                 }
-                if is_reply {
-                    reply_handler_registrations.push(handler_code.clone());
-                }
-                if is_notification {
-                    let sub_code =
-                        quote! {subscriptions.push(std::any::TypeId::of::<#event_type>());};
-                    subscription_registrations.push(sub_code);
-                    notification_handler_registrations.push(handler_code);
-                }
-            } else if is_request || is_reply || is_notification {
-                panic!(
-                    "Invalid handler '{}' for IPC event attributes {}. Expected signature: (&mut self, &<IPCEvent>, ProtocolId, ProtocolHandle)",
-                    method_name,
-                    method
-                        .attrs
-                        .iter()
-                        .map(|attr| attr.path().get_ident().unwrap().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
             }
         }
     }
@@ -135,6 +150,10 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let mut handlers = HashMap::new();
                 #(#notification_handler_registrations)*
                 handlers
+            }
+
+            fn get_shutdown_handler(&self) -> Option<babel::event::ShutdownHandlerFn> {
+                #shutdown_handler
             }
         }
     };

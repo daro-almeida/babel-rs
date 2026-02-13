@@ -16,3 +16,4 @@ pub enum Event {
 }
 
 pub type IPCHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn IPCEvent, ProtocolId, ProtocolHandle)>;
+pub type ShutdownHandlerFn = Box<dyn Fn(&mut dyn Any, ProtocolHandle)>;

@@ -2,7 +2,7 @@ use crate::core::event::{Event, IPCEvent};
 use crate::core::protocol::{Protocol, ProtocolId, ProtocolRuntime};
 use anyhow::anyhow;
 use dashmap::DashMap;
-use log::warn;
+use log::{warn};
 use std::any::{Any, TypeId};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -105,8 +105,10 @@ pub struct Babel {
 
 impl Babel {
     pub fn shutdown(&self) {
-        eprintln!("SHUTDOWN!");
-        todo!()
+        for e in self.runtimes.iter() {
+            e.value().send_event(Event::Shutdown)
+        }
+        // TODO wait for shutdown handlers to finish
     }
 
     fn start_protocol_event_listener(self: Arc<Self>, babel_proto_event_receive: Receiver<Event>) {
@@ -120,7 +122,7 @@ impl Babel {
                         Event::Notification(from, ipc) => self.send_notification(from, ipc),
                         Event::Message => todo!(),
                         Event::Channel => todo!(),
-                        Event::Shutdown => todo!(),
+                        Event::Shutdown => unreachable!(), // TODO maybe discern events that are received here from the ones received in the protocol
                     },
                     Err(_) => panic!("Protocol event listener closed unexpectedly"),
                 }

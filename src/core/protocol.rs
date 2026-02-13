@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
+use crate::event::ShutdownHandlerFn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProtocolId(pub u16);
@@ -77,10 +78,15 @@ impl ProtocolRuntime {
                     Ok(Event::Message) | Ok(Event::Channel) => todo!(),
                     Ok(Event::Shutdown) => {
                         debug!("Protocol {} shutting down", protocol.name());
+                        if let Some(handler) = protocol.get_shutdown_handler() {
+                            handler(&mut protocol, handle.clone());
+                        } else {
+                            debug!("Protocol {} has no shutdown handler", protocol.name());
+                        }
                         break;
                     }
                     Err(_) => {
-                        panic!("Protocol {} channel closed", protocol.name());
+                        panic!("Protocol {} channel closed unexpectedly", protocol.name());
                     }
                 }
             }
@@ -154,7 +160,7 @@ pub trait ProtocolHandlers: ProtocolInit {
 
     //fn get_message_handlers() -> HashMap<TypeId, todo!()>;
     //fn get_channel_event_handlers() -> HashMap<TypeId, todo!()>;
-    //fn get_shutdown_handler() -> HashMap<TypeId, todo!()>;
+    fn get_shutdown_handler(&self) -> Option<ShutdownHandlerFn>;
 }
 
 pub trait Protocol: ProtocolInit + ProtocolHandlers + Send + 'static {}
