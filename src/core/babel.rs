@@ -1,4 +1,4 @@
-use crate::core::event::{Event, IPCEvent};
+use crate::internal::event::{Event, IPCEvent};
 use crate::core::protocol::{Protocol, ProtocolId, ProtocolRuntime};
 use anyhow::anyhow;
 use dashmap::DashMap;

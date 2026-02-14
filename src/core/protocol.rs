@@ -1,5 +1,5 @@
-use crate::core::event::{Event, IPCEvent, IPCHandlerFn};
-use crate::event::ShutdownHandlerFn;
+use crate::internal::event::{Event, IPCEvent, IPCHandlerFn};
+use crate::internal::event::ShutdownHandlerFn;
 use log::{debug, warn};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;

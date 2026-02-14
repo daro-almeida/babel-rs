@@ -8,7 +8,7 @@ pub fn derive_ipc(input: TokenStream) -> TokenStream {
     let name = &input.ident;
 
     let expanded = quote! {
-        impl babel::event::IPCEvent for #name {
+        impl babel::internal::event::IPCEvent for #name {
             fn as_any(&self) -> &dyn std::any::Any {
                 self
             }
@@ -62,7 +62,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 let handler_code = quote! {
                                     handlers.insert(
                                         std::any::TypeId::of::<#event_type>(),
-                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::event::IPCEvent, sender: ProtocolId, handle: ProtocolHandle| {
+                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::internal::event::IPCEvent, sender: ProtocolId, handle: ProtocolHandle| {
                                             let protocol = protocol
                                                 .downcast_mut::<#self_ty>()
                                                 .expect("Protocol type mismatch");
@@ -70,7 +70,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                             if let Some(typed_ipc) = ipc.as_any().downcast_ref::<#event_type>() {
                                                 protocol.#method_name(typed_ipc, sender, handle);
                                             }
-                                        }) as babel::event::IPCHandlerFn
+                                        }) as babel::internal::event::IPCHandlerFn
                                     );
                                 };
 
@@ -109,7 +109,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 .expect("Protocol type mismatch");
 
                                 protocol.# method_name(handle);
-                                }) as babel::event::ShutdownHandlerFn)
+                                }) as babel::internal::event::ShutdownHandlerFn)
                             };
                             shutdown_handler = handler_code;
                         }
@@ -124,14 +124,14 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #impl_block
 
         impl babel::protocol::ProtocolHandlers for #self_ty {
-            fn get_request_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::event::IPCHandlerFn> {
+            fn get_request_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IPCHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
                 #(#request_handler_registrations)*
                 handlers
             }
 
-            fn get_reply_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::event::IPCHandlerFn> {
+            fn get_reply_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IPCHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
                 #(#reply_handler_registrations)*
@@ -145,14 +145,14 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 subscriptions
             }
 
-            fn get_notification_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::event::IPCHandlerFn> {
+            fn get_notification_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IPCHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
                 #(#notification_handler_registrations)*
                 handlers
             }
 
-            fn get_shutdown_handler(&self) -> Option<babel::event::ShutdownHandlerFn> {
+            fn get_shutdown_handler(&self) -> Option<babel::internal::event::ShutdownHandlerFn> {
                 #shutdown_handler
             }
         }
