@@ -34,7 +34,7 @@ impl ChatApp {
     pub fn new() -> Self {
         Self {}
     }
-    
+
     #[notification_handler]
     fn upon_deliver(
         &mut self,

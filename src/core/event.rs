@@ -8,11 +8,11 @@ pub trait IPCEvent: Any + Send + Sync + 'static {
 
 pub enum Event {
     Request(ProtocolId, ProtocolId, Box<dyn IPCEvent>), //from, to, event
-    Reply(ProtocolId, ProtocolId, Box<dyn IPCEvent>), //from, to, event
-    Notification(ProtocolId, Arc<dyn IPCEvent>), //from, event
+    Reply(ProtocolId, ProtocolId, Box<dyn IPCEvent>),   //from, to, event
+    Notification(ProtocolId, Arc<dyn IPCEvent>),        //from, event
     Message,
     Channel,
-    Shutdown
+    Shutdown,
 }
 
 pub type IPCHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn IPCEvent, ProtocolId, ProtocolHandle)>;

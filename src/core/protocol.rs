@@ -1,12 +1,12 @@
 use crate::core::event::{Event, IPCEvent, IPCHandlerFn};
+use crate::event::ShutdownHandlerFn;
 use log::{debug, warn};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread;
-use crate::event::ShutdownHandlerFn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProtocolId(pub u16);
@@ -24,9 +24,7 @@ pub struct ProtocolRuntime {
 
 impl ProtocolRuntime {
     pub fn new(proto_event_sender: mpsc::Sender<Event>) -> Self {
-        Self {
-            proto_event_sender,
-        }
+        Self { proto_event_sender }
     }
 
     pub fn send_event(&self, event: Event) {

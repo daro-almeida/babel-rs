@@ -1,6 +1,6 @@
 use crate::membership::{PeerDown, PeerUp};
 use babel::protocol::{ProtocolHandle, ProtocolId, ProtocolInit};
-use babel_macros::{Ipc, notification_handler, protocol, request_handler};
+use babel_macros::{notification_handler, protocol, request_handler, Ipc};
 use log::info;
 use std::collections::HashSet;
 use std::net::SocketAddr;

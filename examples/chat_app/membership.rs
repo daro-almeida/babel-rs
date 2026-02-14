@@ -1,6 +1,6 @@
 use babel::protocol::{ProtocolHandle, ProtocolId, ProtocolInit};
 use babel_macros::{protocol, Ipc};
-use rand::rngs::{SmallRng, StdRng};
+use rand::rngs::SmallRng;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
@@ -42,7 +42,7 @@ impl FullMembership {
             membership: HashSet::new(),
             pending: HashSet::new(),
             subset_size,
-            rng: rand::make_rng()
+            rng: rand::make_rng(),
         }
     }
 

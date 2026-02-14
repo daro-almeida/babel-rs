@@ -2,7 +2,7 @@ use crate::core::event::{Event, IPCEvent};
 use crate::core::protocol::{Protocol, ProtocolId, ProtocolRuntime};
 use anyhow::anyhow;
 use dashmap::DashMap;
-use log::{warn};
+use log::warn;
 use std::any::{Any, TypeId};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
