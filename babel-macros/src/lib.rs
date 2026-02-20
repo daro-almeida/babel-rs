@@ -148,7 +148,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                                 .expect("Protocol type mismatch");
 
                                             if let Some(typed_message) = message.as_any().downcast_ref::<#event_type>() {
-                                                protocol.#method_name(typed_message, source, handle);
+                                                protocol.#method_name(typed_message, from, source, handle);
                                             }
                                         }) as babel::internal::event::MessageHandlerFn
                                     );
