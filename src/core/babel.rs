@@ -1,5 +1,7 @@
-use crate::internal::event::{Event, IPCEvent};
 use crate::core::protocol::{Protocol, ProtocolId, ProtocolRuntime};
+use crate::internal::event::{
+    Notification, Event, MessageEvent, NotificationEvent, ReplyEvent, RequestEvent,
+};
 use anyhow::anyhow;
 use dashmap::DashMap;
 use log::warn;
@@ -31,9 +33,9 @@ impl BabelBuilder {
     pub fn register_protocol(mut self, protocol: impl Protocol) -> anyhow::Result<Self> {
         match self.protocols.entry(protocol.id()) {
             Entry::Occupied(v) => Err(anyhow!(
-                "ProtocolId conflict: {} <-> {}",
-                v.get().name(),
-                protocol.name()
+                "ProtocolId conflict: {:?} <-> {:?}",
+                v.get().type_id(),
+                protocol.type_id()
             )),
             Entry::Vacant(v) => {
                 v.insert(Box::new(protocol));
@@ -104,11 +106,14 @@ pub struct Babel {
 }
 
 impl Babel {
+    pub fn thread_join_handles() {
+        todo!()
+    }
+
     pub fn shutdown(&self) {
         for e in self.runtimes.iter() {
             e.value().send_event(Event::Shutdown)
         }
-        // TODO wait for shutdown handlers to finish
     }
 
     fn start_protocol_event_listener(self: Arc<Self>, babel_proto_event_receive: Receiver<Event>) {
@@ -116,12 +121,23 @@ impl Babel {
             loop {
                 match babel_proto_event_receive.recv() {
                     Ok(event) => match event {
-                        Event::Request(_, to, _) | Event::Reply(_, to, _) => {
-                            self.send_single_ipc(to, event)
+                        Event::Request(RequestEvent { destination, .. })
+                        | Event::Reply(ReplyEvent { destination, .. }) => {
+                            if let Some(runtime) = self.runtimes.get(&destination) {
+                                runtime.value().send_event(event);
+                            } else {
+                                warn!(
+                                    "Sending Ipc: Protocol with id {} not registered",
+                                    destination
+                                );
+                            }
                         }
-                        Event::Notification(from, ipc) => self.send_notification(from, ipc),
-                        Event::Message => todo!(),
-                        Event::Channel => todo!(),
+                        Event::Notification(NotificationEvent { source, ipc }) => {
+                            self.send_notification(source, ipc)
+                        }
+                        Event::Message(MessageEvent { .. }) => {
+                            // TODO tokio spawn serialize and send message
+                        }
                         Event::Shutdown => unreachable!(), // TODO maybe discern events that are received here from the ones received in the protocol
                     },
                     Err(_) => panic!("Protocol event listener closed unexpectedly"),
@@ -130,18 +146,13 @@ impl Babel {
         });
     }
 
-    fn send_single_ipc(&self, to: ProtocolId, event: Event) {
-        if let Some(runtime) = self.runtimes.get(&to) {
-            runtime.value().send_event(event);
-        } else {
-            warn!("Protocol with id {} not registered", to);
-        }
-    }
-
-    fn send_notification(&self, from: ProtocolId, ipc_arc: Arc<dyn IPCEvent>) {
+    fn send_notification(&self, source: ProtocolId, ipc_arc: Arc<dyn Notification>) {
         if let Some(subscribers) = self.notification_subscriptions.get(&ipc_arc.type_id()) {
             for runtime in subscribers.value() {
-                runtime.send_event(Event::Notification(from, ipc_arc.clone()));
+                runtime.send_event(Event::Notification(NotificationEvent {
+                    source,
+                    ipc: ipc_arc.clone(),
+                }));
             }
         }
     }

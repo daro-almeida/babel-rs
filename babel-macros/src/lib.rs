@@ -7,15 +7,44 @@ pub fn derive_ipc(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
 
-    let expanded = quote! {
-        impl babel::internal::event::IPCEvent for #name {
+    quote! {
+        impl babel::internal::ipc::Ipc for #name {
             fn as_any(&self) -> &dyn std::any::Any {
                 self
             }
         }
-    };
+    }.into()
+}
 
-    TokenStream::from(expanded)
+#[proc_macro_derive(Notification)]
+pub fn derive_notifiaction(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+    quote! {
+        impl Notification for #name {}
+    }.into()
+}
+
+#[proc_macro_derive(Message, attributes(message_id))]
+pub fn derive_message(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    let message_id = input
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("message_id"))
+        .expect("Missing attribute message_id for Message")
+        .parse_args::<syn::LitInt>()
+        .expect("Invalid message_id type. Expected u16")
+        .base10_parse::<u16>()
+        .expect("Invalid message_id type. Expected u16");
+    
+    quote! {
+        impl babel::internal::message::Message for #name {
+            const ID: babel::internal::message::MessageId = babel::internal::message::MessageId(#message_id);
+        }
+    }.into()
 }
 
 #[proc_macro_attribute]
@@ -34,6 +63,11 @@ pub fn notification_handler(_attr: TokenStream, item: TokenStream) -> TokenStrea
 }
 
 #[proc_macro_attribute]
+pub fn message_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+#[proc_macro_attribute]
 pub fn shutdown_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
@@ -47,6 +81,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut reply_handler_registrations = vec![];
     let mut subscription_registrations = vec![];
     let mut notification_handler_registrations = vec![];
+    let mut message_handler_registrations = vec![];
     let mut shutdown_handler = quote! { None };
 
     for item in &impl_block.items {
@@ -62,7 +97,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 let handler_code = quote! {
                                     handlers.insert(
                                         std::any::TypeId::of::<#event_type>(),
-                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::internal::event::IPCEvent, sender: ProtocolId, handle: ProtocolHandle| {
+                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::internal::ipc::Ipc, sender: ProtocolId, handle: ProtocolHandle| {
                                             let protocol = protocol
                                                 .downcast_mut::<#self_ty>()
                                                 .expect("Protocol type mismatch");
@@ -70,7 +105,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                             if let Some(typed_ipc) = ipc.as_any().downcast_ref::<#event_type>() {
                                                 protocol.#method_name(typed_ipc, sender, handle);
                                             }
-                                        }) as babel::internal::event::IPCHandlerFn
+                                        }) as babel::internal::event::IpcHandlerFn
                                     );
                                 };
 
@@ -90,7 +125,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 }
                             } else {
                                 panic!(
-                                    "Invalid handler '{}' for IPC event attributes {}. Expected signature: (&mut self, &<IPCEvent>, ProtocolId, ProtocolHandle)",
+                                    "Invalid handler '{}' for Ipc event attributes {}. Expected signature: (&mut self, &Ipc, ProtocolId, ProtocolHandle)",
                                     method_name,
                                     method
                                         .attrs
@@ -99,6 +134,27 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                         .collect::<Vec<_>>()
                                         .join(", ")
                                 );
+                            }
+                        }
+                        "message_handler" => {
+                            if let Some(event_type) = extract_event_type(&method.sig) {
+                                let handler_code = quote! {
+                                    handlers.insert(
+                                        std::any::TypeId::of::<#event_type>(),
+                                        //&mut dyn Any, &dyn AnyMessage, SocketAddr, ProtocolId, ProtocolHandle
+                                        Box::new(|protocol: &mut dyn std::any::Any, message: &dyn babel::internal::message::AnyMessage, from: SocketAddr, source: ProtocolId, handle: ProtocolHandle| {
+                                            let protocol = protocol
+                                                .downcast_mut::<#self_ty>()
+                                                .expect("Protocol type mismatch");
+
+                                            if let Some(typed_message) = message.as_any().downcast_ref::<#event_type>() {
+                                                protocol.#method_name(typed_message, sender, handle);
+                                            }
+                                        }) as babel::internal::event::MessageHandlerFn
+                                    );
+                                };
+
+                                message_handler_registrations.push(handler_code)
                             }
                         }
                         "shutdown_handler" => {
@@ -124,14 +180,14 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #impl_block
 
         impl babel::protocol::ProtocolHandlers for #self_ty {
-            fn get_request_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IPCHandlerFn> {
+            fn get_request_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IpcHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
                 #(#request_handler_registrations)*
                 handlers
             }
 
-            fn get_reply_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IPCHandlerFn> {
+            fn get_reply_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IpcHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
                 #(#reply_handler_registrations)*
@@ -145,10 +201,17 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 subscriptions
             }
 
-            fn get_notification_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IPCHandlerFn> {
+            fn get_notification_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IpcHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
                 #(#notification_handler_registrations)*
+                handlers
+            }
+
+            fn get_message_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::MessageHandlerFn> {
+                use std::collections::HashMap;
+                let mut handlers = HashMap::new();
+                #(#message_handler_registrations)*
                 handlers
             }
 

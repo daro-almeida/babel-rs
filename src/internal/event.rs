@@ -1,19 +1,43 @@
 use crate::core::protocol::{ProtocolHandle, ProtocolId};
+use crate::internal::message::AnyMessage;
 use std::any::Any;
+use std::net::SocketAddr;
 use std::sync::Arc;
+pub(crate) use crate::internal::ipc::{Notification, Ipc};
 
-pub trait IPCEvent: Any + Send + Sync + 'static {
-    fn as_any(&self) -> &dyn Any;
+pub struct RequestEvent {
+    pub source: ProtocolId,
+    pub destination: ProtocolId,
+    pub ipc: Box<dyn Ipc>
+}
+
+pub struct ReplyEvent {
+    pub source: ProtocolId,
+    pub destination: ProtocolId,
+    pub ipc: Box<dyn Ipc>
+}
+
+pub struct NotificationEvent {
+    pub source: ProtocolId,
+    pub ipc: Arc<dyn Notification>
+}
+
+pub struct MessageEvent {
+    pub source: ProtocolId,
+    pub from: SocketAddr,
+    pub destination: ProtocolId,
+    pub to: SocketAddr,
+    pub message: Arc<dyn AnyMessage>
 }
 
 pub enum Event {
-    Request(ProtocolId, ProtocolId, Box<dyn IPCEvent>), //from, to, event
-    Reply(ProtocolId, ProtocolId, Box<dyn IPCEvent>),   //from, to, event
-    Notification(ProtocolId, Arc<dyn IPCEvent>),        //from, event
-    Message,
-    Channel,
+    Request(RequestEvent),
+    Reply(ReplyEvent),
+    Notification(NotificationEvent), 
+    Message(MessageEvent),
     Shutdown,
 }
 
-pub type IPCHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn IPCEvent, ProtocolId, ProtocolHandle)>;
+pub type IpcHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn Ipc, ProtocolId, ProtocolHandle)>;
+pub type MessageHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn AnyMessage, SocketAddr, ProtocolId, ProtocolHandle)>;
 pub type ShutdownHandlerFn = Box<dyn Fn(&mut dyn Any, ProtocolHandle)>;
