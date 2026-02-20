@@ -97,13 +97,13 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 let handler_code = quote! {
                                     handlers.insert(
                                         std::any::TypeId::of::<#event_type>(),
-                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::internal::ipc::Ipc, sender: ProtocolId, handle: ProtocolHandle| {
+                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::internal::ipc::Ipc, source: ProtocolId, handle: ProtocolHandle| {
                                             let protocol = protocol
                                                 .downcast_mut::<#self_ty>()
                                                 .expect("Protocol type mismatch");
 
                                             if let Some(typed_ipc) = ipc.as_any().downcast_ref::<#event_type>() {
-                                                protocol.#method_name(typed_ipc, sender, handle);
+                                                protocol.#method_name(typed_ipc, source, handle);
                                             }
                                         }) as babel::internal::event::IpcHandlerFn
                                     );
@@ -148,7 +148,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                                 .expect("Protocol type mismatch");
 
                                             if let Some(typed_message) = message.as_any().downcast_ref::<#event_type>() {
-                                                protocol.#method_name(typed_message, sender, handle);
+                                                protocol.#method_name(typed_message, source, handle);
                                             }
                                         }) as babel::internal::event::MessageHandlerFn
                                     );
