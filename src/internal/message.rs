@@ -19,21 +19,25 @@ pub trait Message:
     > + for<'a> Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rkyv::rancor::Error>>
     + Any
     + Send
-    + Sync
 where
     Self: Sized,
 {
     const ID: MessageId;
 }
 
-pub trait AnyMessage: Any + Send + Sync {
+pub trait AnyMessage: Any + Send {
     fn id(&self) -> MessageId;
-    fn as_any(&self) -> &dyn Any; // ← Here!
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
+    fn as_any(&self) -> &dyn Any;
 }
 
 impl<T: Message> AnyMessage for T {
     fn id(&self) -> MessageId {
         T::ID
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
     }
 
     fn as_any(&self) -> &dyn Any {

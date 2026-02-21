@@ -9,11 +9,15 @@ pub fn derive_ipc(input: TokenStream) -> TokenStream {
 
     quote! {
         impl babel::internal::ipc::Ipc for #name {
+            fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+                self
+            }
             fn as_any(&self) -> &dyn std::any::Any {
                 self
             }
         }
-    }.into()
+    }
+    .into()
 }
 
 #[proc_macro_derive(Notification)]
@@ -22,7 +26,8 @@ pub fn derive_notifiaction(input: TokenStream) -> TokenStream {
     let name = &input.ident;
     quote! {
         impl Notification for #name {}
-    }.into()
+    }
+    .into()
 }
 
 #[proc_macro_derive(Message, attributes(message_id))]
@@ -39,7 +44,7 @@ pub fn derive_message(input: TokenStream) -> TokenStream {
         .expect("Invalid message_id type. Expected u16")
         .base10_parse::<u16>()
         .expect("Invalid message_id type. Expected u16");
-    
+
     quote! {
         impl babel::internal::message::Message for #name {
             const ID: babel::internal::message::MessageId = babel::internal::message::MessageId(#message_id);
@@ -92,18 +97,18 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 if let Some(ident) = attr.path().get_ident() {
                     let handler = ident.to_string();
                     match handler.as_str() {
-                        "request_handler" | "reply_handler" | "notification_handler" => {
+                        "request_handler" | "reply_handler" => {
                             if let Some(event_type) = extract_event_type(&method.sig) {
                                 let handler_code = quote! {
                                     handlers.insert(
                                         std::any::TypeId::of::<#event_type>(),
-                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: &dyn babel::internal::ipc::Ipc, source: ProtocolId, handle: ProtocolHandle| {
+                                        Box::new(|protocol: &mut dyn std::any::Any, ipc: Box<dyn babel::internal::ipc::Ipc>, source: ProtocolId, handle: ProtocolHandle| {
                                             let protocol = protocol
                                                 .downcast_mut::<#self_ty>()
                                                 .expect("Protocol type mismatch");
 
-                                            if let Some(typed_ipc) = ipc.as_any().downcast_ref::<#event_type>() {
-                                                protocol.#method_name(typed_ipc, source, handle);
+                                            if let Ok(typed_ipc) = ipc.into_any().downcast::<#event_type>() {
+                                                protocol.#method_name(*typed_ipc, source, handle);
                                             }
                                         }) as babel::internal::event::IpcHandlerFn
                                     );
@@ -116,16 +121,44 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                     "reply_handler" => {
                                         reply_handler_registrations.push(handler_code)
                                     }
-                                    "notification_handler" => {
-                                        let sub_code = quote! {subscriptions.push(std::any::TypeId::of::<#event_type>());};
-                                        subscription_registrations.push(sub_code);
-                                        notification_handler_registrations.push(handler_code)
-                                    }
                                     _ => unreachable!(),
                                 }
                             } else {
                                 panic!(
-                                    "Invalid handler '{}' for Ipc event attributes {}. Expected signature: (&mut self, &Ipc, ProtocolId, ProtocolHandle)",
+                                    "Invalid handler '{}' for Ipc event attribute {}. Expected signature: (&mut self, Ipc, ProtocolId, ProtocolHandle)",
+                                    method_name,
+                                    method
+                                        .attrs
+                                        .iter()
+                                        .map(|attr| attr.path().get_ident().unwrap().to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                );
+                            }
+                        }
+                        "notification_handler" => {
+                            if let Some(event_type) = extract_event_type(&method.sig) {
+                                let handler_code = quote! {
+                                    handlers.insert(
+                                        std::any::TypeId::of::<#event_type>(),
+                                        Box::new(|protocol: &mut dyn std::any::Any, notification: &dyn babel::internal::ipc::Notification, source: ProtocolId, handle: ProtocolHandle| {
+                                            let protocol = protocol
+                                                .downcast_mut::<#self_ty>()
+                                                .expect("Protocol type mismatch");
+
+                                            if let Some(typed_notification) = notification.as_any().downcast_ref::<#event_type>() {
+                                                protocol.#method_name(typed_notification, source, handle);
+                                            }
+                                        }) as babel::internal::event::NotificationHandlerFn
+                                    );
+                                };
+
+                                let sub_code = quote! {subscriptions.push(std::any::TypeId::of::<#event_type>());};
+                                subscription_registrations.push(sub_code);
+                                notification_handler_registrations.push(handler_code)
+                            } else {
+                                panic!(
+                                    "Invalid handler '{}' for Notification event attribute {}. Expected signature: (&mut self, &Notification, ProtocolId, ProtocolHandle)",
                                     method_name,
                                     method
                                         .attrs
@@ -141,20 +174,29 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                                 let handler_code = quote! {
                                     handlers.insert(
                                         std::any::TypeId::of::<#event_type>(),
-                                        //&mut dyn Any, &dyn AnyMessage, SocketAddr, ProtocolId, ProtocolHandle
-                                        Box::new(|protocol: &mut dyn std::any::Any, message: &dyn babel::internal::message::AnyMessage, from: SocketAddr, source: ProtocolId, handle: ProtocolHandle| {
+                                        Box::new(|protocol: &mut dyn std::any::Any, message: Box<dyn babel::internal::message::AnyMessage>, from: SocketAddr, source: ProtocolId, handle: ProtocolHandle| {
                                             let protocol = protocol
                                                 .downcast_mut::<#self_ty>()
                                                 .expect("Protocol type mismatch");
 
-                                            if let Some(typed_message) = message.as_any().downcast_ref::<#event_type>() {
-                                                protocol.#method_name(typed_message, from, source, handle);
+                                            if let Ok(typed_message) = message.into_any().downcast::<#event_type>() {
+                                                protocol.#method_name(*typed_message, from, source, handle);
                                             }
                                         }) as babel::internal::event::MessageHandlerFn
                                     );
                                 };
-
                                 message_handler_registrations.push(handler_code)
+                            } else {
+                                panic!(
+                                    "Invalid handler '{}' for Ipc event attributes {}. Expected signature: (&mut self, Message, SocketAddr, ProtocolId, ChannelId, ProtocolHandle)",
+                                    method_name,
+                                    method
+                                        .attrs
+                                        .iter()
+                                        .map(|attr| attr.path().get_ident().unwrap().to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                );
                             }
                         }
                         "shutdown_handler" => {
@@ -176,7 +218,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
-    let expanded = quote! {
+    quote! {
         #impl_block
 
         impl babel::protocol::ProtocolHandlers for #self_ty {
@@ -201,7 +243,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 subscriptions
             }
 
-            fn get_notification_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::IpcHandlerFn> {
+            fn get_notification_handlers(&self) -> std::collections::HashMap<std::any::TypeId, babel::internal::event::NotificationHandlerFn> {
                 use std::collections::HashMap;
                 let mut handlers = HashMap::new();
                 #(#notification_handler_registrations)*
@@ -219,9 +261,7 @@ pub fn protocol(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #shutdown_handler
             }
         }
-    };
-
-    TokenStream::from(expanded)
+    }.into()
 }
 
 /// extract the event type from the second parameter
@@ -230,9 +270,11 @@ fn extract_event_type(sig: &syn::Signature) -> Option<&Type> {
 
     if let Some(FnArg::Typed(PatType { ty, .. })) = inputs.get(1) {
         if let Type::Reference(type_ref) = &**ty {
-            return Some(&*type_ref.elem);
+            Some(&*type_ref.elem)
+        } else {
+            Some(&*ty)
         }
+    } else {
+        None
     }
-
-    None
 }

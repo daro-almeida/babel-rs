@@ -132,7 +132,7 @@ impl Babel {
                                 );
                             }
                         }
-                        Event::Notification(NotificationEvent { source, ipc }) => {
+                        Event::Notification(NotificationEvent { source, notification: ipc }) => {
                             self.send_notification(source, ipc)
                         }
                         Event::Message(MessageEvent { .. }) => {
@@ -151,7 +151,7 @@ impl Babel {
             for runtime in subscribers.value() {
                 runtime.send_event(Event::Notification(NotificationEvent {
                     source,
-                    ipc: ipc_arc.clone(),
+                    notification: ipc_arc.clone(),
                 }));
             }
         }

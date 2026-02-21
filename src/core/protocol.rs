@@ -1,7 +1,4 @@
-use crate::internal::event::{
-    Notification, Ipc, IpcHandlerFn, MessageEvent, MessageHandlerFn, NotificationEvent, ReplyEvent,
-    ShutdownHandlerFn,
-};
+use crate::internal::event::{Notification, Ipc, IpcHandlerFn, MessageEvent, MessageHandlerFn, NotificationEvent, ReplyEvent, ShutdownHandlerFn, NotificationHandlerFn};
 use crate::internal::event::{Event, RequestEvent};
 use log::{debug, warn};
 use rkyv::{Archive, Deserialize, Serialize};
@@ -59,26 +56,26 @@ impl ProtocolRuntime {
                 match proto_event_receiver.recv() {
                     Ok(Event::Request(RequestEvent { source, ipc, .. })) => Self::handle_ipc_event(
                         protocol_any,
-                        &*ipc,
+                        ipc,
                         source,
                         handle.clone(),
                         &request_handlers,
                     ),
                     Ok(Event::Reply(ReplyEvent { source, ipc, .. })) => Self::handle_ipc_event(
                         protocol_any,
-                        &*ipc,
+                        ipc,
                         source,
                         handle.clone(),
                         &reply_handlers,
                     ),
-                    Ok(Event::Notification(NotificationEvent { source, ipc })) => {
-                        Self::handle_ipc_event(
-                            protocol_any,
-                            &*ipc,
-                            source,
-                            handle.clone(),
-                            &notif_handlers,
-                        )
+                    Ok(Event::Notification(NotificationEvent { source, notification })) => {
+                        let type_id = notification.type_id();
+
+                        if let Some(handler) = notif_handlers.get(&type_id) {
+                            handler(protocol_any, &*notification, source, handle.clone())
+                        } else {
+                            warn!("No handler for received message {:?}", type_id);
+                        }
                     }
                     Ok(Event::Message(MessageEvent {
                         source,
@@ -89,7 +86,7 @@ impl ProtocolRuntime {
                         let type_id = message.type_id();
 
                         if let Some(handler) = message_handlers.get(&type_id) {
-                            handler(protocol_any, &*message, from, source, handle.clone())
+                            handler(protocol_any, message, from, source, handle.clone())
                         } else {
                             warn!("No handler for received message {:?}", type_id);
                         }
@@ -113,7 +110,7 @@ impl ProtocolRuntime {
 
     fn handle_ipc_event(
         protocol_any: &mut dyn Any,
-        ipc: &dyn Ipc,
+        ipc: Box<dyn Ipc>,
         source: ProtocolId,
         handle: ProtocolHandle,
         handlers_map: &HashMap<TypeId, IpcHandlerFn>,
@@ -166,7 +163,7 @@ impl ProtocolHandle {
         self.babel_event_sender
             .send(Event::Notification(NotificationEvent {
                 source: self.id,
-                ipc: Arc::new(notif),
+                notification: Arc::new(notif),
             }))
             .expect("Babel event channel closed");
     }
@@ -181,7 +178,7 @@ pub trait ProtocolHandlers: ProtocolInit {
     fn get_request_handlers(&self) -> HashMap<TypeId, IpcHandlerFn>;
     fn get_reply_handlers(&self) -> HashMap<TypeId, IpcHandlerFn>;
     fn get_subscriptions(&self) -> Vec<TypeId>;
-    fn get_notification_handlers(&self) -> HashMap<TypeId, IpcHandlerFn>;
+    fn get_notification_handlers(&self) -> HashMap<TypeId, NotificationHandlerFn>;
     fn get_message_handlers(&self) -> HashMap<TypeId, MessageHandlerFn>;
     //fn get_channel_event_handlers(&self) -> HashMap<TypeId, todo!()>;
     fn get_shutdown_handler(&self) -> Option<ShutdownHandlerFn>;

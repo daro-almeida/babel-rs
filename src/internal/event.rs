@@ -19,7 +19,7 @@ pub struct ReplyEvent {
 
 pub struct NotificationEvent {
     pub source: ProtocolId,
-    pub ipc: Arc<dyn Notification>
+    pub notification: Arc<dyn Notification>
 }
 
 pub struct MessageEvent {
@@ -27,7 +27,7 @@ pub struct MessageEvent {
     pub from: SocketAddr,
     pub destination: ProtocolId,
     pub to: SocketAddr,
-    pub message: Arc<dyn AnyMessage>
+    pub message: Box<dyn AnyMessage>
 }
 
 pub enum Event {
@@ -38,6 +38,7 @@ pub enum Event {
     Shutdown,
 }
 
-pub type IpcHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn Ipc, ProtocolId, ProtocolHandle)>;
-pub type MessageHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn AnyMessage, SocketAddr, ProtocolId, ProtocolHandle)>;
+pub type IpcHandlerFn = Box<dyn Fn(&mut dyn Any, Box<dyn Ipc>, ProtocolId, ProtocolHandle)>;
+pub type NotificationHandlerFn = Box<dyn Fn(&mut dyn Any, &dyn Notification, ProtocolId, ProtocolHandle)>;
+pub type MessageHandlerFn = Box<dyn Fn(&mut dyn Any, Box<dyn AnyMessage>, SocketAddr, ProtocolId, ProtocolHandle)>;
 pub type ShutdownHandlerFn = Box<dyn Fn(&mut dyn Any, ProtocolHandle)>;
